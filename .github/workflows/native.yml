@@ -53,14 +53,24 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
-      # The ubuntu-24.04 image already ships cmdline-tools and an ANDROID_HOME;
-      # android-actions/setup-android added a second SDK manager whose licence
-      # pass failed, so drive the preinstalled one instead. API 37 ships as
+      # The image ships cmdline-tools but does not put them on PATH, so a bare
+      # `sdkmanager` is "command not found", and android-actions/setup-android
+      # fails because it installs the removed `tools` package. Resolve the
+      # preinstalled manager from the SDK itself. API 37 ships as
       # "android-37.0" — plain "android-37" is not in the repository.
       - name: Install Android SDK 37, build tools and NDK
         run: |
-          yes | sdkmanager --licenses > /dev/null || true
-          sdkmanager --install 'platforms;android-37.0' 'build-tools;37.0.0' \
+          sdk="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
+          echo "ANDROID_SDK_ROOT=$sdk" >> "$GITHUB_ENV"
+          manager="$(find "$sdk" -path '*/cmdline-tools/*/bin/sdkmanager' -type f | sort | tail -1)"
+          if [ -z "$manager" ]; then
+            echo "no sdkmanager below $sdk" >&2
+            find "$sdk" -maxdepth 2 >&2
+            exit 1
+          fi
+          echo "using $manager"
+          yes | "$manager" --licenses > /dev/null || true
+          "$manager" --install 'platforms;android-37.0' 'build-tools;37.0.0' \
             'platform-tools' 'ndk;28.2.13676358' 'cmake;3.22.1'
       - uses: ./.github/actions/flutter
       # `secrets` is not a legal context in `if:`, so the emptiness check runs

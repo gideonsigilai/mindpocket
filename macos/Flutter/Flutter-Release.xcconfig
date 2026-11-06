@@ -1,6 +1,8 @@
-# CocoaPods cannot set the Runner target's base configuration because Flutter's
-# xcconfig is already assigned there, so the Pods settings (PODS_ROOT and the
-# framework file lists) must be pulled in here. Without this, xcodebuild looks
-# for "/Target Support Files/Pods-Runner/..." against an empty PODS_ROOT.
+// CocoaPods cannot set the Runner target's base configuration because
+// Flutter's xcconfig is already assigned there, so the Pods settings
+// (PODS_ROOT and the framework file lists) must be pulled in here. Without
+// this, xcodebuild resolves "/Target Support Files/Pods-Runner/..." against an
+// empty PODS_ROOT. Optional include so a build without pods still configures.
+// The Profile configuration uses this same Release.xcconfig as its base.
 #include? "Pods/Target Support Files/Pods-Runner/Pods-Runner.release.xcconfig"
 #include "ephemeral/Flutter-Generated.xcconfig"
