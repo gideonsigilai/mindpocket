@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:get/get.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:path/path.dart' as p;
@@ -25,11 +26,14 @@ class IncomingShare {
 
 enum IncomingShareKind { text, image, unsupported }
 
-/// Android share-intent intake and the system picker.
+/// Share-intent intake (Android/iOS) and the system picker (all platforms).
 ///
 /// Handles both cold start (`getInitialMedia`) and warm delivery (stream). The
 /// plugin copies shared files into its own cache; we copy them again into
 /// app-owned storage immediately, because the cache entry is temporary.
+///
+/// Windows, Linux, and macOS have no share-intent plugin: intake is a no-op
+/// there and the picker plus automatic screenshot import remain the real paths.
 class ShareIntakeService extends GetxService {
   ShareIntakeService();
 
@@ -47,6 +51,10 @@ class ShareIntakeService extends GetxService {
   Future<void> start() async {
     if (_initialised) return;
     _initialised = true;
+    if (!_supportsShareIntents) {
+      logDebug('Share-intent intake is not available on this platform');
+      return;
+    }
     _subscription = ReceiveSharingIntent.instance.getMediaStream().listen(
       _handleBatch,
       onError: (Object error) => logWarn('Share stream error', error),
@@ -64,6 +72,9 @@ class ShareIntakeService extends GetxService {
       logWarn('Initial share read failed', error);
     }
   }
+
+  static bool get _supportsShareIntents =>
+      !kIsWeb && (Platform.isAndroid || Platform.isIOS);
 
   Future<void> _handleBatch(List<SharedMediaFile> files) async {
     for (final SharedMediaFile file in files) {

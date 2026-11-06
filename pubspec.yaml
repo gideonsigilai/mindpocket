@@ -38,6 +38,10 @@ dependencies:
   # Audio capture + playback
   record: ^7.1.2
   just_audio: ^0.10.6
+  # just_audio has no Windows/Linux backend; media_kit supplies libmpv audio.
+  just_audio_media_kit: ^2.1.0
+  media_kit_libs_windows_audio: ^1.0.9
+  media_kit_libs_linux: ^1.2.1
 
   # On-device OCR (bundled Latin model, no Play Services required)
   google_mlkit_text_recognition: ^0.17.1

@@ -1,7 +1,10 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 import 'package:get/get.dart';
+import 'package:just_audio_media_kit/just_audio_media_kit.dart';
 
 import 'app/bindings/initial_binding.dart';
 import 'app/routes/app_pages.dart';
@@ -19,12 +22,23 @@ import 'core/utils/logger.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  // Phones are portrait-first. Desktop windows are freely resizable, so pinning
+  // orientation there would be meaningless and would fight the window manager.
+  if (Platform.isAndroid || Platform.isIOS) {
+    await SystemChrome.setPreferredOrientations(<DeviceOrientation>[
+      DeviceOrientation.portraitUp,
+      DeviceOrientation.portraitDown,
+    ]);
+  }
 
-  // Portraits only: every screen is designed for a one-handed phone first.
-  await SystemChrome.setPreferredOrientations(<DeviceOrientation>[
-    DeviceOrientation.portraitUp,
-    DeviceOrientation.portraitDown,
-  ]);
+  // Windows and Linux have no just_audio backend of their own. Registering the
+  // media_kit backend is a no-op on platforms just_audio already supports.
+  if (Platform.isWindows || Platform.isLinux) {
+    JustAudioMediaKit.ensureInitialized(
+      windows: Platform.isWindows,
+      linux: Platform.isLinux,
+    );
+  }
 
   final PreferencesService preferences = await PreferencesService().init();
 

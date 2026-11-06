@@ -1,11 +1,33 @@
+import 'dart:io';
+
 import 'package:get/get.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'package:record/record.dart';
 
 /// Wraps permission requests so every caller handles denial the same way:
 /// explain, offer Settings, and stay functional without the feature.
 class PermissionsService extends GetxService {
   /// True when recording can start. Requests microphone access on first use.
+  ///
+  /// `permission_handler` reports microphone as permanently denied on desktop
+  /// because there is no runtime prompt there. Windows, macOS, and Linux gate
+  /// capture in the OS privacy settings and via the recorder backend, so the
+  /// recorder's own capability check is the real signal.
   Future<PermissionOutcome> ensureMicrophone() async {
+    if (Platform.isWindows || Platform.isLinux || Platform.isMacOS) {
+      final AudioRecorder probe = AudioRecorder();
+      try {
+        return await probe.hasPermission() ||
+                await probe.hasPermission(request: true)
+            ? PermissionOutcome.granted
+            : PermissionOutcome.denied;
+      } on Exception {
+        // Linux reports a missing audio session as a failure, not a denial.
+        return PermissionOutcome.denied;
+      } finally {
+        await probe.dispose();
+      }
+    }
     final PermissionStatus status = await Permission.microphone.status;
     if (status.isGranted || status.isLimited) return PermissionOutcome.granted;
     if (status.isPermanentlyDenied) return PermissionOutcome.blocked;
@@ -19,6 +41,10 @@ class PermissionsService extends GetxService {
   /// Notifications are only needed for the optional completion notice, so a
   /// denial is never fatal and never blocks capture.
   Future<PermissionOutcome> ensureNotification() async {
+    // Desktop has no notification permission to request from this plugin.
+    if (Platform.isWindows || Platform.isLinux) {
+      return PermissionOutcome.denied;
+    }
     final PermissionStatus status = await Permission.notification.status;
     if (status.isGranted) return PermissionOutcome.granted;
     if (status.isPermanentlyDenied) return PermissionOutcome.blocked;

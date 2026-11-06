@@ -1,4 +1,15 @@
+import 'dart:async';
+import 'dart:collection';
+import 'dart:convert';
+import 'dart:io';
+import 'dart:isolate';
+
+import 'package:crypto/crypto.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
+import 'package:path/path.dart' as p;
+
+part 'desktop_screenshot_library.dart';
 
 /// One screenshot reported by the device's media store.
 class DeviceScreenshot {
@@ -12,6 +23,7 @@ class DeviceScreenshot {
     required this.byteSize,
     required this.bucket,
     required this.mimeType,
+    this.revision,
   });
 
   factory DeviceScreenshot.fromMap(Map<Object?, Object?> map) =>
@@ -39,24 +51,55 @@ class DeviceScreenshot {
   final String bucket;
   final String mimeType;
 
-  /// Capture time protects against reused media IDs after a gallery wipe.
-  String get key => '$id@${takenAt.millisecondsSinceEpoch}';
+  /// Desktop content fingerprint; mobile receipts retain their original shape.
+  final String? revision;
+
+  /// Capture time protects mobile IDs; desktop revisions also detect edits and
+  /// replacement files, including equal-size files with preserved timestamps.
+  String get key => revision == null
+      ? '$id@${takenAt.millisecondsSinceEpoch}'
+      : '$id@${takenAt.millisecondsSinceEpoch}@$revision';
 }
 
-/// Enumerates screenshot metadata, never the rest of the user's gallery.
-///
-/// Native enumeration and copying run on workers. Small bounded metadata pages
-/// are decoded here; moving these maps to another isolate would add a second
-/// copy without moving any image work off the UI isolate.
+/// Enumerates only screenshots, using MediaStore/PhotoKit on mobile and a
+/// conservative, non-recursive filesystem library on desktop.
 class ScreenshotSource {
   ScreenshotSource({MethodChannel? channel})
-    : _channel = channel ?? const MethodChannel('mindpocket/screenshots');
+    : _channel = channel ?? const MethodChannel('mindpocket/screenshots'),
+      _desktop =
+          channel == null &&
+              (Platform.isWindows || Platform.isLinux || Platform.isMacOS)
+          ? _DesktopScreenshotLibrary(
+              operatingSystem: Platform.operatingSystem,
+              environment: Platform.environment,
+            )
+          : null;
+
+  /// Exercises real filesystem workers with an isolated home directory, without
+  /// reading the test machine's OS preferences or personal screenshot folders.
+  @visibleForTesting
+  ScreenshotSource.desktop({
+    required String operatingSystem,
+    required Map<String, String> environment,
+    String? macCaptureDirectory,
+  }) : _channel = const MethodChannel('mindpocket/screenshots'),
+       _desktop = _DesktopScreenshotLibrary(
+         operatingSystem: operatingSystem,
+         environment: Map<String, String>.unmodifiable(environment),
+         macCaptureDirectory: macCaptureDirectory,
+         readSystemPreferences: false,
+       );
 
   final MethodChannel _channel;
+  final _DesktopScreenshotLibrary? _desktop;
   Future<bool>? _permissionRequest;
 
-  Future<bool> hasPermission() async =>
-      await _channel.invokeMethod<bool>('permission') ?? false;
+  Future<bool> hasPermission() async {
+    final _DesktopScreenshotLibrary? desktop = _desktop;
+    return desktop != null
+        ? desktop.hasPermission()
+        : await _channel.invokeMethod<bool>('permission') ?? false;
+  }
 
   /// Permission UI stays on the root isolate and overlapping callers share it.
   Future<bool> requestPermission() =>
@@ -64,13 +107,20 @@ class ScreenshotSource {
 
   Future<bool> _requestPermission() async {
     try {
+      final _DesktopScreenshotLibrary? desktop = _desktop;
+      if (desktop != null) return await desktop.hasPermission();
       return await _channel.invokeMethod<bool>('requestPermission') ?? false;
     } finally {
       _permissionRequest = null;
     }
   }
 
-  Future<int> count() async => await _channel.invokeMethod<int>('count') ?? 0;
+  Future<int> count() async {
+    final _DesktopScreenshotLibrary? desktop = _desktop;
+    return desktop != null
+        ? desktop.count()
+        : await _channel.invokeMethod<int>('count') ?? 0;
+  }
 
   /// A bounded page in stable ascending native-ID order, strictly after
   /// [afterId]. Capture timestamps are not cursors: screenshots saved later can
@@ -82,12 +132,13 @@ class ScreenshotSource {
     String? afterId,
     int limit = 500,
   }) async {
+    final _DesktopScreenshotLibrary? desktop = _desktop;
+    if (desktop != null) {
+      return desktop.list(afterId: afterId, limit: limit);
+    }
     final List<Object?>? rows = await _channel.invokeMethod<List<Object?>>(
       'list',
-      <String, Object?>{
-        'afterId': ?afterId,
-        'limit': limit,
-      },
+      <String, Object?>{'afterId': ?afterId, 'limit': limit},
     );
     return (rows ?? const <Object?>[])
         .cast<Map<Object?, Object?>>()
@@ -95,8 +146,10 @@ class ScreenshotSource {
         .toList(growable: false);
   }
 
-  /// Copies through ContentResolver / PhotoKit, never an assumed public path.
+  /// Copies the original through the native media API or a desktop file worker.
   Future<void> copyTo(String contentUri, String destination) async {
+    final _DesktopScreenshotLibrary? desktop = _desktop;
+    if (desktop != null) return desktop.copyTo(contentUri, destination);
     final bool copied =
         await _channel.invokeMethod<bool>('copy', <String, Object?>{
           'contentUri': contentUri,
