@@ -228,25 +228,10 @@ jobs:
           test "$(uname -m)" = arm64
           xcodebuild -version
       - uses: ./.github/actions/flutter
-      - name: Compile unsigned iOS release
+      - name: Compile iOS release without codesigning
         run: flutter build ios --release --no-codesign
-      - name: Package compilation artifact (not an installable IPA)
+      - name: Package the unsigned IPA
         run: python3 tool/release/package.py ios
-      # `secrets` is not a legal context in `if:`; ios-sign.sh requires all four
-      # variables itself, so skipping happens here on the empty certificate.
-      - name: Sign an installable IPA when Apple signing secrets exist
-        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
-        env:
-          IOS_CERTIFICATE_BASE64: ${{ secrets.IOS_CERTIFICATE_BASE64 }}
-          IOS_CERTIFICATE_PASSWORD: ${{ secrets.IOS_CERTIFICATE_PASSWORD }}
-          IOS_PROVISIONING_PROFILE_BASE64: ${{ secrets.IOS_PROVISIONING_PROFILE_BASE64 }}
-          IOS_EXPORT_OPTIONS_PLIST_BASE64: ${{ secrets.IOS_EXPORT_OPTIONS_PLIST_BASE64 }}
-        run: |
-          if [ -z "$IOS_CERTIFICATE_BASE64" ]; then
-            echo 'No Apple signing secrets are configured; keeping the unsigned compilation archive only.' >> "$GITHUB_STEP_SUMMARY"
-            exit 0
-          fi
-          bash tool/release/ios-sign.sh
       - uses: actions/upload-artifact@v4
         with:
           name: native-ios

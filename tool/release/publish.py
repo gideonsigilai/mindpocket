@@ -59,13 +59,7 @@ def main() -> int:
     if empty:
         raise ReleaseError(f"Empty artifacts: {', '.join(empty)}")
 
-    # A signed IPA supersedes the unsigned compilation archive for the same build.
-    signed_ipa = [path for path in assets if path.suffix == ".ipa"]
-    if signed_ipa:
-        unsigned = [path for path in assets if path.suffix == ".zip" and "-ios-" in path.name]
-        assets = [path for path in assets if path not in unsigned]
-        for path in unsigned:
-            path.unlink()
+
 
     platforms = {
         "android": ("-android-",),
@@ -104,11 +98,9 @@ def main() -> int:
         else "Android artifacts are debug-signed and unsuitable for production distribution.\n\n"
     )
     notes += (
-        "The iOS asset is a signed IPA built from the configured distribution\n"
-        "certificate and provisioning profile.\n"
-        if signed_ipa
-        else "The iOS asset is an unsigned compilation archive: it cannot be installed\n"
-        "on a device or uploaded to App Store Connect as-is.\n"
+        "The iOS .ipa holds the compiled Payload/Runner.app and carries no code\n"
+        "signature, so it needs signing with your own certificate and profile\n"
+        "before it will install on a device.\n"
     )
     checksums = DIST / "SHA256SUMS"
     lines = []

@@ -38,7 +38,7 @@ Four real Windows-only defects surfaced here and were fixed:
    installs per-user under `LOCALAPPDATA\Programs`. It now checks the
    per-machine, per-user and x86 locations before failing.
 
-## Linux (compiled and packaged in CI)
+## Linux
 
 `lib/core/services/screenshots/screenshot_source.dart` selects
 `_DesktopScreenshotLibrary` on Linux and reads `XDG_PICTURES_DIR`/
@@ -59,26 +59,39 @@ alternatives.
 The Flutter Linux binary itself could not be built on this workstation: the SDK
 download and the GTK/libmpv development packages did not finish over this
 connection. CI covers it — the `linux` job compiles the release, packages the
-Debian and tarball artifacts, installs the `.deb` and smoke-launches
-`/opt/mindpocket/mindpocket` under `xvfb-run`/`dbus-run-session`.
+Debian and tarball artifacts, and smoke-launches the installed binary under
+`xvfb-run`/`dbus-run-session` on Ubuntu 24.04.
 
 ## macOS and iOS
 
-No Apple hardware or Xcode exists on this machine. macOS OCR runs through the
-`mindpocket/ocr` channel implemented in `macos/Runner/MainFlutterWindow.swift`
-(Apple Vision); the Windows/Linux Tesseract path and the mobile ML Kit path are
-the ones exercised locally. Compilation, signing, and packaging for macOS and
-iOS happen only in `.github/workflows/native.yml`.
+macOS OCR runs through the `mindpocket/ocr` channel implemented in
+`macos/Runner/MainFlutterWindow.swift` (Apple Vision); the Windows/Linux
+Tesseract path and the mobile ML Kit path are the ones exercised locally.
+Compilation, packaging and the release itself were verified by running
+`native.yml`: all six build jobs succeeded and the `release` job published tag
+`v1.0.0` with eleven assets. The iOS asset is
+`MindPocket-1.0.0+1-ios-unsigned.ipa`, a `Payload/Runner.app` archive with no
+code signature; the pipeline never loads Apple signing material, so installing
+it requires signing with your own certificate and provisioning profile.
 
-Two defects were found by those CI runs and fixed:
+Three defects were found by those CI runs and fixed:
 
 1. macOS had no `Podfile`, so no plugin would have linked. Added, using
    CocoaPods because every Apple plugin here ships a podspec and none ships a
    Swift package.
-2. The `xcodebuild` step failed with an empty `PODS_ROOT`, resolving
-   `Pods-Runner-frameworks-Release-input-files.xcfilelist` against `/`. CocoaPods
-   cannot assign the Runner target's base configuration because Flutter's
-   xcconfig already owns it, and Flutter's macOS xcconfig — unlike its iOS one —
-   never included the Pods settings. `Flutter-Debug.xcconfig` and
+2. `xcodebuild` failed with an empty `PODS_ROOT`, resolving
+   `Pods-Runner-frameworks-Release-input-files.xcfilelist` against `/`.
+   CocoaPods cannot assign the Runner target's base configuration because
+   Flutter's xcconfig already owns it, and Flutter's macOS xcconfig — unlike its
+   iOS one — never included the Pods settings. `Flutter-Debug.xcconfig` and
    `Flutter-Release.xcconfig` now include them with `#include?`, so a build
    without pods still configures.
+3. Those comments were written with `#`, which xcconfig reads as a preprocessor
+   directive, so the next run failed with "unsupported preprocessor directive
+   'CocoaPods'". xcconfig comments are `//`.
+
+The Android job had two separate failures of the same kind: `setup-android`
+installs the removed `tools` package, and the image's `cmdline-tools` are not on
+`PATH`, so `sdkmanager` was "command not found". The workflow now resolves
+`sdkmanager` from `ANDROID_HOME` and exports `ANDROID_SDK_ROOT`. The platform it
+installs is `android-37.0`; plain `android-37` is not published.

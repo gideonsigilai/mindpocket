@@ -306,8 +306,11 @@ def package_ios() -> None:
         raise PackagingError(
             "iOS bundle identifier does not match com.mindpocket.mindpocket."
         )
-    output = DIST / f"MindPocket-{semver}+{build}-ios-unsigned-app.zip"
-    zip_tree(app, output, arc_root="Runner.app")
+    # An .ipa is a zip whose single top-level entry is Payload/Runner.app. This
+    # one is not signed, so it will not install as-is; it is the compilation
+    # artifact, named for what it actually is.
+    output = DIST / f"MindPocket-{semver}+{build}-ios-unsigned.ipa"
+    zip_tree(app, output, arc_root="Payload/Runner.app")
 
 
 def main() -> None:

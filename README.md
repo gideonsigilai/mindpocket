@@ -121,7 +121,7 @@ notes rather than presented as installable.
 | Windows | `MindPocket-<version>-windows-installer.exe` (Inno Setup, bundled Tesseract) and `…-windows-x64.zip` (portable) |
 | Linux | `mindpocket_<version>_amd64.deb` and `MindPocket-<version>-linux-amd64.tar.gz` |
 | macOS | `MindPocket-<version>-macos-<arch>.zip` holding the ad-hoc signed `.app` |
-| iOS | `MindPocket-<version>-ios-unsigned-app.zip`, or `…-ios-signed.ipa` when Apple secrets exist |
+| iOS | `MindPocket-<version>-ios-unsigned.ipa` — a `Payload/Runner.app` archive with no code signature, for signing with your own certificate and profile |
 
 Signing material is only ever loaded for `v*` tag pushes; these repository
 secrets change what gets built:
@@ -129,11 +129,10 @@ secrets change what gets built:
 | Secret | Effect when set |
 | --- | --- |
 | `ANDROID_KEYSTORE_BASE64`, `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS`, `ANDROID_KEY_PASSWORD` | Release-signed APKs and App Bundle on tag pushes; otherwise debug-signed |
-| `IOS_CERTIFICATE_BASE64`, `IOS_CERTIFICATE_PASSWORD`, `IOS_PROVISIONING_PROFILE_BASE64`, `IOS_EXPORT_OPTIONS_PLIST_BASE64` | Signed installable IPA; otherwise an explicitly unsigned compilation archive |
 
 Signing material is never decoded for pull requests or branch pushes, and a
 partial Android configuration fails the Gradle build instead of silently
-falling back.
+falling back. The iOS job never touches signing material at all.
 
 
 ## Why bundled SQLite
