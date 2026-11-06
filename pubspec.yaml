@@ -1,0 +1,79 @@
+name: mindpocket
+description: "MindPocket — screenshots and voice notes in one offline, searchable memory collection."
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.13.7
+
+dependencies:
+  flutter:
+    sdk: flutter
+  cupertino_icons: ^1.0.8
+
+  # State, DI, routing
+  get: ^4.7.3
+
+  # Networking (model downloads, optional cloud proxy)
+  dio: ^5.11.1
+
+  # Lightweight preferences / onboarding state
+  get_storage: ^2.1.1
+  flutter_secure_storage: ^11.2.0
+
+  # Persistence. Bundled SQLite (via sqlite3 3.x code assets) is required:
+  # Android's system SQLite is compiled without FTS5, verified on the test
+  # device, so sqflite cannot support the search index.
+  sqflite_common_ffi: ^2.4.5
+  sqlite3: ^3.8.0
+  path: ^1.9.1
+  path_provider: ^2.1.6
+
+  # UI
+  flutter_screenutil: ^5.9.3
+
+  # Logging
+  logger: ^2.8.0
+
+  # Audio capture + playback
+  record: ^7.1.2
+  just_audio: ^0.10.6
+
+  # On-device OCR (bundled Latin model, no Play Services required)
+  google_mlkit_text_recognition: ^0.17.1
+
+  # On-device transcription (sherpa-onnx native libs, offline Whisper)
+  sherpa_onnx: ^2.0.1
+
+  # Android share targets + picker + permissions
+  receive_sharing_intent: ^1.9.0
+  image_picker: ^1.2.4
+  permission_handler: ^13.0.2
+
+  # Hashing for duplicate detection and model integrity
+  crypto: ^3.0.8
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/images/
+  # Declared so `fontFamily: 'Manrope'` resolves to the bundled files instead of
+  # silently falling back to the platform default.
+  fonts:
+    - family: Manrope
+      fonts:
+        - asset: assets/fonts/Manrope-Regular.ttf
+          weight: 400
+        - asset: assets/fonts/Manrope-Medium.ttf
+          weight: 500
+        - asset: assets/fonts/Manrope-SemiBold.ttf
+          weight: 600
+        - asset: assets/fonts/Manrope-Bold.ttf
+          weight: 700
+        - asset: assets/fonts/Manrope-ExtraBold.ttf
+          weight: 800
