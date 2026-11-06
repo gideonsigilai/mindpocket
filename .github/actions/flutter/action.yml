@@ -1,0 +1,13 @@
+name: Pinned Flutter SDK
+description: Install the exact Flutter/Dart toolchain and locked packages.
+runs:
+  using: composite
+  steps:
+    - uses: subosito/flutter-action@v2
+      with:
+        flutter-version: '3.47.9'
+        channel: stable
+        cache: true
+    - name: Resolve locked packages
+      shell: bash
+      run: flutter pub get --enforce-lockfile

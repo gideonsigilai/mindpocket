@@ -4,6 +4,29 @@ plugins {
     id("dev.flutter.flutter-gradle-plugin")
 }
 
+// Release signing is supplied by the environment so no keystore or password is
+// ever committed. CI decodes the keystore to a temporary file and passes these
+// variables; local release builds without them fall back to debug signing,
+// which is explicitly labelled as unsuitable for distribution.
+val releaseKeystorePath: String? = System.getenv("CI_ANDROID_KEYSTORE_PATH")
+val releaseKeystorePassword: String? = System.getenv("CI_ANDROID_KEYSTORE_PASSWORD")
+val releaseKeyAlias: String? = System.getenv("CI_ANDROID_KEY_ALIAS")
+val releaseKeyPassword: String? = System.getenv("CI_ANDROID_KEY_PASSWORD")
+val signingInputs = listOf(
+    releaseKeystorePath,
+    releaseKeystorePassword,
+    releaseKeyAlias,
+    releaseKeyPassword,
+)
+
+if (signingInputs.any { !it.isNullOrBlank() } && signingInputs.any { it.isNullOrBlank() }) {
+    throw GradleException(
+        "Partial Android release signing configuration. Set all of " +
+            "CI_ANDROID_KEYSTORE_PATH, CI_ANDROID_KEYSTORE_PASSWORD, " +
+            "CI_ANDROID_KEY_ALIAS and CI_ANDROID_KEY_PASSWORD, or none of them."
+    )
+}
+
 android {
     namespace = "com.mindpocket.mindpocket"
     // permission_handler_android and receive_sharing_intent require compileSdk
@@ -33,11 +56,29 @@ android {
         versionName = flutter.versionName
     }
 
+    signingConfigs {
+        if (!releaseKeystorePath.isNullOrBlank()) {
+            create("release") {
+                storeFile = file(releaseKeystorePath)
+                storePassword = releaseKeystorePassword
+                keyAlias = releaseKeyAlias
+                keyPassword = releaseKeyPassword
+                enableV1Signing = true
+                enableV2Signing = true
+            }
+        }
+    }
+
     buildTypes {
         release {
-            // Debug signing keeps `flutter run --release` working for local
-            // verification. Replace with a real keystore before distribution.
-            signingConfig = signingConfigs.getByName("debug")
+            // Real distribution signing when CI supplies a keystore; otherwise
+            // debug signing keeps local `flutter run --release` working. Release
+            // tooling labels artifacts built without a keystore accordingly.
+            signingConfig = if (!releaseKeystorePath.isNullOrBlank()) {
+                signingConfigs.getByName("release")
+            } else {
+                signingConfigs.getByName("debug")
+            }
             isMinifyEnabled = false
             isShrinkResources = false
         }

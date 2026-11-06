@@ -12,11 +12,11 @@ download an iCloud-only screenshot's original before it can be imported.
 | Area | Behavior |
 | --- | --- |
 | Capture | System image picker, Android share intent (cold/warm start), recording with pause/resume, typed notes, and attachments |
-| Screenshots | Launch/resume scans use Android MediaStore or iOS PhotoKit. A one-time permission request follows onboarding; limited access is supported. Durable receipts copy/process only unseen screenshots, including equal-date items and older images added later |
+| Screenshots | Launch/resume scans use Android MediaStore, iOS PhotoKit, or the real OS screenshot folders on desktop. A one-time permission request follows onboarding; limited access is supported. Durable receipts copy/process only unseen screenshots, including equal-date items and older images added later |
 | AI grouping | NVIDIA NIM files imported screenshots into collections by their extracted text (never the image bytes), reusing existing collection names, batching 25 items per request, one collection link per item, and reporting backend/parse failures without touching what is already filed |
 | Timeline | Filters (all / images / voice / notes / starred), newest or oldest first, paginated, skeletons, empty and error states |
 | Detail | Image-first preview (~75% of viewport), reduced-motion-aware parallax, original-image zoom, collapsed **Text from image**, tag-chip dialog, audio/transcript editing, and related-image previews; completed/canceled processing is hidden |
-| OCR | ML Kit bundled Latin recognizer, on device, dispatched through a background Dart isolate; no Play Services or first-use model download |
+| OCR | On device through a background Dart isolate: ML Kit's bundled Latin recognizer on Android/iOS, Apple Vision on macOS, Tesseract on Windows/Linux (bundled on Windows, a declared dependency on Linux). No Play Services, no first-use model download, no cloud fallback |
 | Search | Isolate-backed SQLite FTS5 over titles, notes, tags, OCR, and transcripts; BM25 snippets and off-thread lexical relatedness; stale query responses are discarded |
 | Transcription | Optional sherpa-onnx Whisper (tiny.en ~103 MB, tiny multilingual), downloaded to app storage, SHA-256 verified, run in a background isolate |
 | Jobs | Persisted queue, one job at a time, interrupted jobs requeued on launch, retry/cancel; parked transcription never blocks screenshot OCR |
@@ -33,6 +33,10 @@ download an iCloud-only screenshot's original before it can be imported.
 - AGP 9.3.1 + Gradle 9.6.1 (set in `android/settings.gradle.kts` and the
   wrapper; AGP 9.1 cannot resolve minor-version platforms)
 - minSdk 24, arm64 device for on-device Whisper
+- Desktop: Windows 10+ (x64), Linux with GTK 3 (`libmpv2`, `ffmpeg`,
+  `pulseaudio-utils`, `tesseract-ocr`), macOS 13+ (Apple Silicon or Intel).
+  Desktop OCR uses Tesseract on Windows/Linux and Apple Vision on macOS;
+  there is no cloud fallback.
 - iOS 15.5+, macOS/Xcode and signing credentials to build/run on an iPhone.
 
 ## Build and run
@@ -76,6 +80,60 @@ launchctl setenv PERMISSION_HANDLER_INFO_PLIST "$PWD/ios/Runner/Info.plist"
 
 Relaunch Xcode after setting it. No iOS share extension is registered; use
 automatic screenshot import or the system picker.
+
+### Desktop
+
+```sh
+flutter build windows --release   # needs Visual Studio with C++ desktop workload
+flutter build linux --release     # needs libgtk-3-dev, libsecret-1-dev, libmpv-dev
+flutter build macos --release     # needs Xcode command line tools
+```
+
+Desktop screenshot intake reads the real OS folders (`Pictures\Screenshots` and
+OneDrive on Windows, XDG `user-dirs.dirs` entries on Linux, the
+`com.apple.screencapture` location and Desktop on macOS). Files that are not
+screenshots are never imported: dedicated folders take every image, while shared
+folders such as `Desktop` and `Pictures` require a screenshot-style filename.
+Access failures are reported; a missing folder is an empty library.
+
+Windows releases bundle Tesseract next to the executable, so OCR works without a
+separate install. Linux packages declare their OCR, audio and video runtime
+packages as Debian dependencies instead of embedding them.
+
+### Release pipeline
+
+`.github/workflows/native.yml` runs analyze/tests once (`quality`), then builds
+Android, Windows, Linux, macOS and iOS on their own runners and uploads one
+artifact per platform. Every packaging step goes through
+`tool/release/package.py`, which names assets
+`MindPocket-<semver>+<build>-<platform>-<arch>.<ext>` from `pubspec.yaml`, so a
+release can never advertise a version the source does not declare.
+
+Pushing a `v*` tag additionally runs the `release` job: it downloads every
+platform artifact, refuses to continue if any platform is missing, writes
+`SHA256SUMS`, creates the release as a draft, attaches all assets, and only then
+publishes. Unsigned or debug-signed outputs are labelled as such in the release
+notes rather than presented as installable.
+
+| Platform | Assets |
+| --- | --- |
+| Android | `MindPocket-<version>-android-<abi>.apk` per ABI, plus `…-android-release.aab` |
+| Windows | `MindPocket-<version>-windows-installer.exe` (Inno Setup, bundled Tesseract) and `…-windows-x64.zip` (portable) |
+| Linux | `mindpocket_<version>_amd64.deb` and `MindPocket-<version>-linux-amd64.tar.gz` |
+| macOS | `MindPocket-<version>-macos-<arch>.zip` holding the ad-hoc signed `.app` |
+| iOS | `MindPocket-<version>-ios-unsigned-app.zip`, or `…-ios-signed.ipa` when Apple secrets exist |
+
+Signing material is only ever loaded for `v*` tag pushes; these repository
+secrets change what gets built:
+
+| Secret | Effect when set |
+| --- | --- |
+| `ANDROID_KEYSTORE_BASE64`, `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS`, `ANDROID_KEY_PASSWORD` | Release-signed APKs and App Bundle on tag pushes; otherwise debug-signed |
+| `IOS_CERTIFICATE_BASE64`, `IOS_CERTIFICATE_PASSWORD`, `IOS_PROVISIONING_PROFILE_BASE64`, `IOS_EXPORT_OPTIONS_PLIST_BASE64` | Signed installable IPA; otherwise an explicitly unsigned compilation archive |
+
+Signing material is never decoded for pull requests or branch pushes, and a
+partial Android configuration fails the Gradle build instead of silently
+falling back.
 
 
 ## Why bundled SQLite
@@ -155,20 +213,40 @@ a throwaway directory, with deterministic OCR/ASR fakes:
 - NIM grouping: creates and reuses collections, links each item once, a backend
   failure changes nothing, omitted items keep their current collections, fenced
   JSON is parsed, unknown ids are dropped, a missing key fails before any request
+- desktop screenshot filesystem intake: a missing folder is an empty library,
+  unrelated images in a shared folder are ignored, pages resume after a cursor,
+  an edited file gets a new revision key, copies are byte-exact, a moved source
+  is refused, symlinks are never followed out of the folder
+- desktop OCR: a missing engine is reported as `ocr_unavailable` rather than an
+  empty success, an empty image is rejected, and real Tesseract output keeps
+  non-ASCII characters (the em dash in the fixture) intact
 
 ## Latest verification
 
-- Full Flutter suite: **95 passing**.
-- Static analysis: **no issues**.
-- Android debug builds: multi-ABI and arm64 split APKs built.
+- Full Flutter suite: **105 passing** (including desktop screenshot and OCR
+  coverage), static analysis: **no issues**.
+- Windows: clean `flutter build windows --release`, then `windows.ps1` produced a
+  66 MB Inno Setup installer and a 93 MB portable ZIP; the packaged build was
+  launched from its portable folder and stayed resident. See `verify/desktop.md`.
+- Windows OCR, end to end: the packaged app discovered the real
+  `Pictures\Screenshots` folder, imported 37 screenshots with no manual action,
+  and Tesseract extracted genuine text from them. This run also caught two real
+  defects, both fixed: stdout decoded with the ANSI code page (mojibake in
+  non-ASCII text) and Tesseract looked up only under `Program Files` while winget
+  installs per-user.
+- Android release: `flutter build apk --release --split-per-abi` produced three
+  ABIs; `apksigner` confirms the debug certificate when no keystore secrets are
+  set, which the release notes state explicitly.
 - Android device: automatic startup Photos prompt; new screenshot imported,
   OCR completed and thumbnail persisted without manual import.
 - Live schema upgrade 2 → 3 preserved all 8 existing memories; database
   integrity check returned `ok`.
 - Memory-detail interactions and compact/large-text/tablet layouts exercised
   through real widgets; device evidence is recorded in `verify/findings.md`.
-- iOS property lists, project references, schemes, storyboards and 19 icon
-  dimensions validated; Xcode/iPhone execution remains unverified.
+- iOS and macOS: no Xcode exists on this workstation. Property lists, project
+  references, schemes, storyboards, icon dimensions and the `mindpocket/ocr`
+  Vision channel were reviewed statically; compilation and signing happen only
+  in `.github/workflows/native.yml` and remain unverified here.
 
 ## Previous verification results
 
