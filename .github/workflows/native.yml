@@ -53,12 +53,15 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
-      - uses: android-actions/setup-android@v3
+      # The ubuntu-24.04 image already ships cmdline-tools and an ANDROID_HOME;
+      # android-actions/setup-android added a second SDK manager whose licence
+      # pass failed, so drive the preinstalled one instead. API 37 ships as
+      # "android-37.0" — plain "android-37" is not in the repository.
       - name: Install Android SDK 37, build tools and NDK
         run: |
-          yes | sdkmanager --licenses >/dev/null
-          sdkmanager 'platforms;android-37' 'build-tools;37.0.0' 'platform-tools' \
-            'ndk;28.2.13676358' 'cmake;3.22.1'
+          yes | sdkmanager --licenses > /dev/null || true
+          sdkmanager --install 'platforms;android-37.0' 'build-tools;37.0.0' \
+            'platform-tools' 'ndk;28.2.13676358' 'cmake;3.22.1'
       - uses: ./.github/actions/flutter
       # `secrets` is not a legal context in `if:`, so the emptiness check runs
       # inside the step. Only the keystore path is exported; passwords stay in
@@ -184,13 +187,11 @@ jobs:
           test "$(uname -m)" = arm64
           xcodebuild -version
       - uses: ./.github/actions/flutter
-      - name: Install CocoaPods dependencies
-        # Unabridged `flutter build macos` produces a release with distribution
-        # signing attempted; this job wants an unsigned but complete bundle, so
-        # generate the Flutter config, install pods, then build with xcodebuild.
-        run: |
-          flutter build macos --release --config-only
-          pod install --project-directory=macos
+      - name: Generate Flutter config and install CocoaPods dependencies
+        # `flutter build macos` would attempt distribution signing, so its
+        # configuration phase runs alone here; that phase already writes
+        # Flutter-Generated.xcconfig and runs `pod install` for the Podfile.
+        run: flutter build macos --release --config-only
       - name: Build macOS release without distribution signing
         run: |
           xcodebuild -workspace macos/Runner.xcworkspace -scheme Runner \
