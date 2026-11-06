@@ -10,7 +10,7 @@ Tesseract 5 (UB-Mannheim), NuGet feed pinned by the repository `NuGet.config`.
 | --- | --- |
 | `flutter build windows --release` on a clean `build/windows` tree | Built `build\windows\x64\runner\Release\mindpocket.exe` |
 | Bundled native libraries | `libmpv-2.dll` (media_kit), `sqlite3.dll` (code asset), `sherpa-onnx-c-api.dll`, `onnxruntime.dll`, and the four plugin DLLs are all in the release bundle |
-| Debug-signed-free launch | The release executable stayed resident for 12 s and logged `package:media_kit_libs_windows_audio registered` |
+| Release launch | The release executable stayed resident for 12 s and logged `package:media_kit_libs_windows_audio registered` |
 | Automatic screenshot import without any UI action | 37 memories created by scanning the real `Pictures\Screenshots` folder; no manual import step |
 | OCR dispatch on this platform | Jobs recorded `Text extraction needs the Tesseract OCR component, which is missing from this installation.` with type `ocr`, status `failed` while Tesseract was absent — the honest error, not a silent empty success |
 | Windows package format | `mode=ro` reads of `mindpocket.db` show `memories`, `processing_jobs`, `memory_fts` and the schema-v3 tables, so the packaged SQLite (not the OS copy) is in use |
@@ -18,6 +18,7 @@ Tesseract 5 (UB-Mannheim), NuGet feed pinned by the repository `NuGet.config`.
 | Bundled OCR runtime | `portable\tesseract\tesseract.exe` reports `tesseract v5.4.0.20240606` and `tessdata` holds exactly `eng.traineddata` |
 | OCR through the app | After installing Tesseract, 3 jobs completed and `extractions` holds real text (`Director General / Gambling Regulatory Authority of Kenya`), so the platform dispatch, isolate hop and `Process.run` path all work |
 | Desktop UI | Captured the real release window at 1280×720 (`shots/windows_desktop_timeline.png`): sidebar Home/Collections/Settings, search field, filter chips, the screenshot grid with thumbnails and honest "Text extraction failed" badges, and the Capture action |
+| Artifact verification | `python tool/release/package.py windows` accepts the produced installer and portable archive and rejects a bundle without them |
 
 Four real Windows-only defects surfaced here and were fixed:
 
@@ -37,7 +38,7 @@ Four real Windows-only defects surfaced here and were fixed:
    installs per-user under `LOCALAPPDATA\Programs`. It now checks the
    per-machine, per-user and x86 locations before failing.
 
-## Linux
+## Linux (compiled and packaged in CI)
 
 `lib/core/services/screenshots/screenshot_source.dart` selects
 `_DesktopScreenshotLibrary` on Linux and reads `XDG_PICTURES_DIR`/
@@ -53,15 +54,31 @@ bundle: it produced `mindpocket_1.0.0+1_amd64.deb` and
 payload, desktop entry, 512×512 icon and `Installed-Size`. `apt-get install -s`
 resolves the declared dependencies on Debian 13, which is why they name the
 64-bit-time packages (`libgtk-3-0t64`, `libsecret-1-0t64`) with the old names as
-alternatives. Building the Flutter Linux binary itself was not possible here:
-the SDK download and the GTK/libmpv development packages did not finish over
-this connection in the time available, so the CMake configure and the Xvfb
-smoke launch are exercised only by CI.
+alternatives.
+
+The Flutter Linux binary itself could not be built on this workstation: the SDK
+download and the GTK/libmpv development packages did not finish over this
+connection. CI covers it — the `linux` job compiles the release, packages the
+Debian and tarball artifacts, installs the `.deb` and smoke-launches
+`/opt/mindpocket/mindpocket` under `xvfb-run`/`dbus-run-session`.
 
 ## macOS and iOS
 
 No Apple hardware or Xcode exists on this machine. macOS OCR runs through the
 `mindpocket/ocr` channel implemented in `macos/Runner/MainFlutterWindow.swift`
 (Apple Vision); the Windows/Linux Tesseract path and the mobile ML Kit path are
-the ones exercised here. Compilation, signing, and packaging for macOS and iOS
-happen only in `.github/workflows/native.yml`.
+the ones exercised locally. Compilation, signing, and packaging for macOS and
+iOS happen only in `.github/workflows/native.yml`.
+
+Two defects were found by those CI runs and fixed:
+
+1. macOS had no `Podfile`, so no plugin would have linked. Added, using
+   CocoaPods because every Apple plugin here ships a podspec and none ships a
+   Swift package.
+2. The `xcodebuild` step failed with an empty `PODS_ROOT`, resolving
+   `Pods-Runner-frameworks-Release-input-files.xcfilelist` against `/`. CocoaPods
+   cannot assign the Runner target's base configuration because Flutter's
+   xcconfig already owns it, and Flutter's macOS xcconfig — unlike its iOS one —
+   never included the Pods settings. `Flutter-Debug.xcconfig` and
+   `Flutter-Release.xcconfig` now include them with `#include?`, so a build
+   without pods still configures.
