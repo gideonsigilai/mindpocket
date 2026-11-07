@@ -232,6 +232,13 @@ jobs:
         run: flutter build ios --release --no-codesign
       - name: Package the unsigned IPA
         run: python3 tool/release/package.py ios
+      - name: Verify unsigned IPA structure
+        run: |
+          ipa="$(ls dist/*-ios-unsigned.ipa)"
+          test -f "$ipa"
+          echo "Inspecting $ipa..."
+          unzip -l "$ipa" | grep 'Payload/Runner.app/Info.plist'
+          echo "Verified: unsigned IPA contains Payload/Runner.app"
       - uses: actions/upload-artifact@v6
         with:
           name: native-ios

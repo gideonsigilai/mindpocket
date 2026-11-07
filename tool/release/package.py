@@ -70,22 +70,6 @@ def record(path: Path) -> None:
     print(f"{path.name}\t{path.stat().st_size}\t{sha256(path)}")
 
 
-def zip_tree(source: Path, destination: Path, arc_root: str | None = None) -> Path:
-    """Zip a tree without dereferencing symlinks into absolute host paths."""
-    output = fresh(destination)
-    with zipfile.ZipFile(output, "w", zipfile.ZIP_DEFLATED, compresslevel=6) as archive:
-        for entry in sorted(source.rglob("*")):
-            if entry.is_symlink():
-                continue
-            if not entry.is_file():
-                continue
-            arcname = entry.relative_to(source)
-            if arc_root:
-                arcname = Path(arc_root) / arcname
-            archive.write(entry, arcname.as_posix())
-    record(output)
-    return output
-
 
 def require_binary(directory: Path, name: str) -> None:
     if not (directory / name).exists():
@@ -297,21 +281,64 @@ def package_macos() -> None:
 
 def package_ios() -> None:
     semver, build = version()
-    app = ROOT / "build" / "ios" / "iphoneos" / "Runner.app"
-    if not app.exists():
-        raise PackagingError(f"iOS compilation output not found: {app}")
+    candidates = [
+        ROOT / "build" / "ios" / "iphoneos" / "Runner.app",
+        ROOT / "build" / "ios" / "Release-iphoneos" / "Runner.app",
+    ]
+    app = next((p for p in candidates if p.exists()), None)
+    if not app:
+        raise PackagingError(f"iOS compilation output not found: {candidates[0]}")
     with (app / "Info.plist").open("rb") as handle:
         info = plistlib.load(handle)
     if str(info.get("CFBundleIdentifier", "")).strip() != BUNDLE_ID:
         raise PackagingError(
             "iOS bundle identifier does not match com.mindpocket.mindpocket."
         )
-    # An .ipa is a zip whose single top-level entry is Payload/Runner.app. This
-    # one is not signed, so it will not install as-is; it is the compilation
-    # artifact, named for what it actually is.
-    output = DIST / f"MindPocket-{semver}+{build}-ios-unsigned.ipa"
-    zip_tree(app, output, arc_root="Payload/Runner.app")
 
+    output = DIST / f"MindPocket-{semver}+{build}-ios-unsigned.ipa"
+    fresh(output)
+
+    # An .ipa is a zip archive containing Payload/Runner.app. This build is not
+    # signed (--no-codesign) and must be signed with a personal certificate
+    # and provisioning profile before installing.
+    staging = ROOT / "build" / "ios" / "ipa_staging"
+    if staging.exists():
+        shutil.rmtree(staging)
+    payload = staging / "Payload"
+    payload.mkdir(parents=True, exist_ok=True)
+    shutil.copytree(app, payload / app.name, symlinks=True)
+
+    zip_binary = shutil.which("zip")
+    if zip_binary:
+        subprocess.run(
+            [zip_binary, "-r", "-y", "-q", str(output.resolve()), "Payload"],
+            cwd=str(staging),
+            check=True,
+        )
+    else:
+        with zipfile.ZipFile(output, "w", zipfile.ZIP_DEFLATED, compresslevel=6) as archive:
+            for entry in sorted(staging.rglob("*")):
+                arcname = entry.relative_to(staging).as_posix()
+                st = entry.lstat()
+                if entry.is_symlink():
+                    zinfo = zipfile.ZipInfo(arcname)
+                    zinfo.create_system = 3
+                    zinfo.external_attr = 0o120777 << 16
+                    archive.writestr(zinfo, os.readlink(entry))
+                elif entry.is_dir():
+                    zinfo = zipfile.ZipInfo(f"{arcname}/")
+                    zinfo.create_system = 3
+                    zinfo.external_attr = ((st.st_mode & 0xFFFF) << 16) | 0x10
+                    archive.writestr(zinfo, b"")
+                elif entry.is_file():
+                    zinfo = zipfile.ZipInfo.from_file(entry, arcname)
+                    zinfo.create_system = 3
+                    mode = 0o100755 if (is_macho(entry) or bool(st.st_mode & 0o111)) else (st.st_mode & 0xFFFF)
+                    zinfo.external_attr = mode << 16
+                    with entry.open("rb") as f:
+                        archive.writestr(zinfo, f.read(), compress_type=zipfile.ZIP_DEFLATED)
+    shutil.rmtree(staging, ignore_errors=True)
+    record(output)
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
