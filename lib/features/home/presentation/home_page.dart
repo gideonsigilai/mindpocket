@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 import 'package:get/get.dart';
 
@@ -294,23 +295,12 @@ class _Timeline extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Obx(() {
-      if (controller.loading.value && controller.memories.isEmpty) {
-        return SliverPadding(
-          padding: EdgeInsets.symmetric(
-            horizontal: wide ? 32.w : 20.w,
-            vertical: 12.h,
-          ),
-          sliver: SliverList.builder(
-            itemCount: 4,
-            itemBuilder: (BuildContext context, int index) => Padding(
-              padding: EdgeInsets.only(bottom: 12.h),
-              child: const _CardSkeleton(),
-            ),
-          ),
-        );
-      }
+      final bool showSkeletons =
+          controller.loading.value && controller.memories.isEmpty;
 
-      if (controller.error.value.isNotEmpty && controller.memories.isEmpty) {
+      if (!showSkeletons &&
+          controller.error.value.isNotEmpty &&
+          controller.memories.isEmpty) {
         return SliverPadding(
           padding: EdgeInsets.symmetric(
             horizontal: wide ? 32.w : 20.w,
@@ -325,7 +315,7 @@ class _Timeline extends StatelessWidget {
         );
       }
 
-      if (controller.memories.isEmpty) {
+      if (!showSkeletons && controller.memories.isEmpty) {
         return SliverPadding(
           padding: EdgeInsets.symmetric(horizontal: wide ? 32.w : 20.w),
           sliver: SliverToBoxAdapter(
@@ -334,7 +324,8 @@ class _Timeline extends StatelessWidget {
         );
       }
 
-      Widget buildRow(BuildContext context, int index) {
+      Widget buildCard(BuildContext context, int index) {
+        if (showSkeletons) return const _CardSkeleton();
         final Memory memory = controller.memories[index];
         if (index >= controller.memories.length - 4) {
           controller.loadMore();
@@ -349,44 +340,34 @@ class _Timeline extends StatelessWidget {
         );
       }
 
-      // Cards must grow with enlarged text, so phones use a list with natural
-      // heights; only the two-column tablet layout fixes a cell height.
-      if (!wide) {
-        return SliverPadding(
-          padding: EdgeInsets.fromLTRB(20.w, 4.h, 20.w, 0),
-          sliver: SliverList.separated(
-            itemCount: controller.memories.length,
-            itemBuilder: buildRow,
-            separatorBuilder: (BuildContext context, int index) =>
-                SizedBox(height: 12.h),
-          ),
-        );
-      }
-
-      // Same 980px column as the header, so the grid lines up with it instead of
-      // drifting to the screen edges.
-      return SliverPadding(
-        padding: EdgeInsets.fromLTRB(32.w, 4.h, 32.w, 0),
-        sliver: SliverToBoxAdapter(
-          child: Center(
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 980),
-              child: GridView.builder(
-                shrinkWrap: true,
-                physics: const NeverScrollableScrollPhysics(),
-                padding: EdgeInsets.zero,
-                gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                  crossAxisCount: 2,
-                  mainAxisSpacing: 12,
-                  crossAxisSpacing: 12,
-                  mainAxisExtent: 164,
-                ),
-                itemCount: controller.memories.length,
-                itemBuilder: buildRow,
+      return SliverLayoutBuilder(
+        builder: (BuildContext context, SliverConstraints constraints) {
+          final double gutter = wide ? 32.w : 20.w;
+          final double width = (constraints.crossAxisExtent - gutter * 2).clamp(
+            0.0,
+            980.0,
+          );
+          final double inset = (constraints.crossAxisExtent - width) / 2;
+          final double gap = 12.r;
+          final TextScaler textScaler = MediaQuery.textScalerOf(context);
+          final int columns = ((width + gap) / (textScaler.scale(150.r) + gap))
+              .floor()
+              .clamp(1, 4);
+          return SliverPadding(
+            padding: EdgeInsets.fromLTRB(inset, 4.h, inset, 0),
+            sliver: SliverGrid.builder(
+              gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                crossAxisCount: columns,
+                mainAxisSpacing: gap,
+                crossAxisSpacing: gap,
+                // Grow with system type size instead of clipping larger text.
+                mainAxisExtent: 180.r + textScaler.scale(160),
               ),
+              itemCount: showSkeletons ? 4 : controller.memories.length,
+              itemBuilder: buildCard,
             ),
-          ),
-        ),
+          );
+        },
       );
     });
   }
@@ -459,29 +440,24 @@ class _CardSkeleton extends StatelessWidget {
     final Color base = AppColors.raised(brightness);
     return PocketCard(
       padding: EdgeInsets.all(14.r),
-      child: Row(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
-          Container(
-            width: 82.r,
-            height: 82.r,
-            decoration: BoxDecoration(
-              color: base,
-              borderRadius: BorderRadius.circular(18.r),
-            ),
-          ),
-          SizedBox(width: 14.w),
           Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: <Widget>[
-                _Bar(width: 160.w, height: 14),
-                SizedBox(height: 10.h),
-                _Bar(width: double.infinity, height: 10),
-                SizedBox(height: 8.h),
-                _Bar(width: 120.w, height: 10),
-              ],
+            child: Container(
+              width: double.infinity,
+              decoration: BoxDecoration(
+                color: base,
+                borderRadius: BorderRadius.circular(18.r),
+              ),
             ),
           ),
+          SizedBox(height: 12.h),
+          const _Bar(width: double.infinity, height: 14),
+          SizedBox(height: 10.h),
+          const _Bar(width: double.infinity, height: 10),
+          SizedBox(height: 8.h),
+          _Bar(width: 80.r, height: 10),
         ],
       ),
     );

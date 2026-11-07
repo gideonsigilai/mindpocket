@@ -43,8 +43,9 @@ class OcrService extends GetxService implements TextExtractor {
     : _tesseractOverride = tesseractExecutable;
 
   final PathService _paths;
-  /// Test seam for the desktop engine path; production resolves the bundled
-  /// build next to the executable so a release never depends on PATH.
+
+  /// Explicit engine path for tests; production prefers the bundled runtime,
+  /// then standard desktop installations.
   final String? _tesseractOverride;
 
   bool _closed = false;
@@ -65,19 +66,17 @@ class OcrService extends GetxService implements TextExtractor {
     }
     if (Platform.isWindows || Platform.isLinux) {
       final bool windows = Platform.isWindows;
-      final String executable =
-          _tesseractOverride ?? _tesseractExecutable(windows);
-      final String? tessdata = _tesseractOverride == null
-          ? _tesseractDataDirectory(windows)
-          : _tessdataFor(_tesseractOverride);
-      return Isolate.run(
-        () => _recognizeWithTesseract(
+      final String? override = _tesseractOverride;
+      return Isolate.run(() {
+        final String executable = override ?? _tesseractExecutable(windows);
+        return _recognizeWithTesseract(
           path,
           executable: executable,
-          tessdataDirectory: tessdata,
-        ),
-        debugName: 'image-ocr',
-      );
+          tessdataDirectory: windows || override != null
+              ? _tessdataFor(executable)
+              : null,
+        );
+      }, debugName: 'image-ocr');
     }
     final RootIsolateToken? token = RootIsolateToken.instance;
     if (token == null) {
@@ -98,20 +97,38 @@ class OcrService extends GetxService implements TextExtractor {
       _paths.absolute(relativePath);
 }
 
-/// Windows releases ship Tesseract beside the executable; Linux distributions
-/// depend on the system package. A missing binary is a real, reported failure.
+/// Packaged Windows builds are self-contained. Development builds can also use
+/// an installed engine without requiring it to have been added to PATH.
 String _tesseractExecutable(bool windows) {
   if (!windows) return 'tesseract';
-  return p.join(
+  final String bundled = p.join(
     p.dirname(Platform.resolvedExecutable),
     'tesseract',
     'tesseract.exe',
   );
-}
-
-String? _tesseractDataDirectory(bool windows) {
-  if (!windows) return null;
-  return _tessdataFor(_tesseractExecutable(windows));
+  if (File(bundled).existsSync()) return bundled;
+  final Map<String, String> environment = Platform.environment;
+  for (final String key in const <String>[
+    'LOCALAPPDATA',
+    'ProgramFiles',
+    'ProgramFiles(x86)',
+  ]) {
+    final String? root = environment[key];
+    if (root == null || root.isEmpty) continue;
+    final String candidate = key == 'LOCALAPPDATA'
+        ? p.join(root, 'Programs', 'Tesseract-OCR', 'tesseract.exe')
+        : p.join(root, 'Tesseract-OCR', 'tesseract.exe');
+    if (File(candidate).existsSync()) return candidate;
+  }
+  for (final String directory in (environment['PATH'] ?? '').split(';')) {
+    if (directory.trim().isEmpty) continue;
+    final String candidate = p.join(
+      directory.replaceAll('"', ''),
+      'tesseract.exe',
+    );
+    if (File(candidate).existsSync()) return candidate;
+  }
+  return bundled;
 }
 
 /// Tesseract resolves `tessdata` beside its own binary unless told otherwise.

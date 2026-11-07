@@ -27,13 +27,13 @@ void main() {
         3,
       );
       final Memory related = await screenshot(
-        'Packing checklist',
-        'coast train camera notebook',
+        'City itinerary',
+        'coast train tickets museums',
         5,
       );
       final Memory unrelated = await screenshot(
-        'Dinner recipe',
-        'basil pasta tomatoes',
+        'City itinerary',
+        'coast train camera notebook',
         7,
       );
 
@@ -54,6 +54,112 @@ void main() {
       );
       expect(match.sharedTerms, containsAll(<String>['coast', 'train']));
       expect(match.memory.primaryThumbnailPath, related.primaryThumbnailPath);
+    },
+  );
+
+  test('detail matches include exactly 90% and reject weaker overlap', () async {
+    final Harness harness = await Harness.create();
+    addTearDown(harness.dispose);
+    Future<Memory> note(String text) =>
+        harness.memories.createNote(title: '', note: text);
+    final Memory reference = await note('abcde fghij');
+    final Memory substitution = await note('abcde fghiz');
+    final Memory deletion = await note('abcde fghi');
+    final Memory insertion = await note('abcde fghijz');
+    final Memory below = await note('abcde fghyz');
+    final Memory longer = await note('abcde fghijzz');
+    final RelatedService service = RelatedService(
+      harness.database,
+      harness.memories,
+    );
+    final List<RelatedSuggestion> suggestions = await service.forMemory(
+      reference,
+      limit: 10,
+    );
+
+    expect(
+      suggestions.map((RelatedSuggestion item) => item.memory.id),
+      unorderedEquals(<String>[substitution.id, deletion.id, insertion.id]),
+    );
+    expect(
+      suggestions
+          .firstWhere(
+            (RelatedSuggestion item) => item.memory.id == substitution.id,
+          )
+          .score,
+      closeTo(.9, 1e-9),
+    );
+    // Search stays lexical: the detail-only threshold must not hide word hits.
+    final List<RelatedSuggestion> query = await service.forQuery('abcde');
+    expect(
+      query.map((RelatedSuggestion item) => item.memory.id),
+      containsAll(<String>[below.id, longer.id]),
+    );
+  });
+
+  test(
+    'detail compares Unicode text without case or formatting noise',
+    () async {
+      final Harness harness = await Harness.create();
+      addTearDown(harness.dispose);
+      final Memory reference = await harness.memories.createNote(
+        title: '',
+        note: 'École: 東京, café!',
+      );
+      final Memory formatted = await harness.memories.createNote(
+        title: '',
+        note: '  ÉCOLE\n東京 — CAFÉ. ',
+      );
+      final RelatedService service = RelatedService(
+        harness.database,
+        harness.memories,
+      );
+      final List<RelatedSuggestion> suggestions = await service.forMemory(
+        reference,
+      );
+      expect(
+        suggestions.map((RelatedSuggestion item) => item.memory.id),
+        <String>[formatted.id],
+      );
+      expect(suggestions.single.score, 1);
+
+      final Memory blank = await harness.memories.createNote(
+        title: '...',
+        note: '! — ?',
+      );
+      expect(await service.forMemory(blank), isEmpty);
+    },
+  );
+
+  test(
+    '90% applies to the whole text, including scattered letter edits',
+    () async {
+      final Harness harness = await Harness.create();
+      addTearDown(harness.dispose);
+      final String text = List<String>.filled(10, 'abcdefghij').join();
+      final List<String> changed = text.split('');
+      for (int index = 0; index < changed.length; index += 10) {
+        changed[index] = 'z';
+      }
+      final Memory reference = await harness.memories.createNote(
+        title: '',
+        note: text,
+      );
+      final Memory threshold = await harness.memories.createNote(
+        title: '',
+        note: changed.join(),
+      );
+      changed[5] = 'z';
+      await harness.memories.createNote(title: '', note: changed.join());
+      final List<RelatedSuggestion> suggestions = await RelatedService(
+        harness.database,
+        harness.memories,
+      ).forMemory(reference);
+      expect(
+        suggestions.map((RelatedSuggestion item) => item.memory.id),
+        <String>[threshold.id],
+      );
+      expect(suggestions.single.score, closeTo(.9, 1e-9));
     },
   );
 }

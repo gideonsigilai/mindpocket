@@ -10,16 +10,13 @@ import '../../models/memory.dart';
 import '../../utils/text_utils.dart';
 import '../storage/memory_service.dart';
 
-/// Local, explicit relatedness. Two references are supported without any model
-/// download:
+/// Local relatedness without a model download. Memory detail requires at least
+/// 90% character similarity across titles, notes, OCR, and transcripts. Queries,
+/// collections, and interests use lexical overlap (TF-IDF over local documents).
 ///
-/// * lexical overlap with the user's query (TF-IDF over local documents);
-/// * token overlap with a named collection, another memory, or the interests the
-///   user selected.
-///
-/// Scores are *ranks*, not calibrated confidence. The UI always words results as
-/// "Possibly related", ties them to a named reference, and lets the user dismiss
-/// them. This works on text only; it does not understand image content.
+/// Scores describe text similarity or ranking, never calibrated confidence.
+/// Suggestions name their reference and can be dismissed. Image pixels are not
+/// compared.
 class RelatedService extends GetxService {
   RelatedService(this._database, this._memoryService);
 
@@ -77,7 +74,7 @@ class RelatedService extends GetxService {
     );
   }
 
-  /// Related memories for one memory.
+  /// Only near-matching text (90% or more) is suggested on memory detail.
   Future<List<RelatedSuggestion>> forMemory(
     Memory memory, {
     int limit = 4,
@@ -88,14 +85,9 @@ class RelatedService extends GetxService {
       limit: 200,
       includeExtractions: true,
     );
-    return _rank(
-      memories: all,
-      referenceText: referenceText,
-      maxReferenceTerms: 40,
-      referenceLabel: memory.title.isEmpty ? 'this memory' : memory.title,
-      referenceKind: RelatedReference.memory,
-      excludeId: memory.id,
-      limit: limit,
+    return Isolate.run(
+      () => _matchingMemories(all, memory, limit),
+      debugName: 'related-memory-text',
     );
   }
 
@@ -229,6 +221,114 @@ class RelatedService extends GetxService {
       return b.memory.updatedAt.compareTo(a.memory.updatedAt);
     });
     return scored.take(limit).toList(growable: false);
+  }
+
+  static final RegExp _nonLetters = RegExp(r'[^\p{L}\p{N}]', unicode: true);
+
+  static List<int> _letters(String text) => text
+      .toLowerCase()
+      .replaceAll(_nonLetters, '')
+      .runes
+      .toList(growable: false);
+
+  static List<RelatedSuggestion> _matchingMemories(
+    List<Memory> memories,
+    Memory reference,
+    int limit,
+  ) {
+    final List<int> letters = _letters(reference.combinedText);
+    if (letters.isEmpty) return const <RelatedSuggestion>[];
+    final Set<String> terms = tokenize(reference.combinedText).toSet();
+    final List<RelatedSuggestion> matches = <RelatedSuggestion>[];
+    for (final Memory memory in memories) {
+      if (memory.id == reference.id) continue;
+      final String text = memory.combinedText;
+      final double? similarity = _letterSimilarity(letters, _letters(text));
+      if (similarity == null) continue;
+      matches.add(
+        RelatedSuggestion(
+          memory: memory,
+          sharedTerms: tokenize(text)
+              .toSet()
+              .where(terms.contains)
+              .take(4)
+              .toList(growable: false),
+          referenceLabel: reference.title.isEmpty
+              ? 'this memory'
+              : reference.title,
+          referenceKind: RelatedReference.memory,
+          score: similarity,
+        ),
+      );
+    }
+    matches.sort((RelatedSuggestion a, RelatedSuggestion b) {
+      final int byScore = b.score.compareTo(a.score);
+      return byScore != 0
+          ? byScore
+          : b.memory.updatedAt.compareTo(a.memory.updatedAt);
+    });
+    return matches.take(limit).toList(growable: false);
+  }
+
+  /// Normalized Levenshtein similarity; null below 90%. Strip equal ends, then
+  /// compute only the edit band that could still meet the threshold.
+  static double? _letterSimilarity(List<int> left, List<int> right) {
+    if (right.isEmpty) return null;
+    final int length = math.max(left.length, right.length);
+    final int maxEdits = length ~/ 10;
+    if ((left.length - right.length).abs() > maxEdits) return null;
+
+    int start = 0;
+    int leftEnd = left.length;
+    int rightEnd = right.length;
+    while (start < leftEnd && start < rightEnd && left[start] == right[start]) {
+      start++;
+    }
+    while (leftEnd > start &&
+        rightEnd > start &&
+        left[leftEnd - 1] == right[rightEnd - 1]) {
+      leftEnd--;
+      rightEnd--;
+    }
+    final int rows = leftEnd - start;
+    final int columns = rightEnd - start;
+    if (rows == 0 || columns == 0) {
+      final int edits = rows + columns;
+      return edits <= maxEdits ? 1 - edits / length : null;
+    }
+
+    final int outside = maxEdits + 1;
+    List<int> previous = List<int>.generate(
+      columns + 1,
+      (int column) => column <= maxEdits ? column : outside,
+      growable: false,
+    );
+    List<int> current = List<int>.filled(columns + 1, outside);
+    for (int row = 1; row <= rows; row++) {
+      final int first = math.max(1, row - maxEdits);
+      final int last = math.min(columns, row + maxEdits);
+      current[0] = row <= maxEdits ? row : outside;
+      if (first > 1) current[first - 1] = outside;
+      if (last < columns) current[last + 1] = outside;
+      int best = current[0];
+      for (int column = first; column <= last; column++) {
+        final int substitution =
+            previous[column - 1] +
+            (left[start + row - 1] == right[start + column - 1] ? 0 : 1);
+        final int edits = math.min(
+          substitution,
+          math.min(previous[column] + 1, current[column - 1] + 1),
+        );
+        current[column] = edits;
+        best = math.min(best, edits);
+      }
+      if (best > maxEdits) return null;
+      final List<int> swap = previous;
+      previous = current;
+      current = swap;
+    }
+    final int edits = previous[columns];
+    return edits <= maxEdits ? 1 - edits / length : null;
   }
 
   static double _sqrt(double value) => value <= 0 ? 1 : math.sqrt(value);

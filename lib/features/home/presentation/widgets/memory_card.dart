@@ -11,8 +11,7 @@ import '../../../../core/utils/text_utils.dart';
 import '../../../../core/widgets/pocket_widgets.dart';
 import '../../../../core/services/storage/path_service.dart';
 
-/// Timeline row. Kept as a small widget so only the affected card rebuilds when
-/// a single memory changes.
+/// Image-first grid tile. Only the affected card rebuilds when a memory changes.
 class MemoryCard extends StatelessWidget {
   const MemoryCard({
     super.key,
@@ -46,68 +45,43 @@ class MemoryCard extends StatelessWidget {
 
     return PocketCard(
       onTap: onTap,
-      padding: EdgeInsets.all(14.r),
+      padding: EdgeInsets.all(12.r),
       semanticLabel: _semantics,
-      child: Row(
+      child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
-          _Thumbnail(memory: memory),
-          SizedBox(width: 14.w),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: <Widget>[
-                Text(
-                  memory.title.trim().isEmpty
-                      ? 'Untitled memory'
-                      : memory.title,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: text.titleMedium,
-                ),
-                if (subtitle.isNotEmpty) ...<Widget>[
-                  SizedBox(height: 4.h),
-                  Text(
-                    subtitle,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: text.bodySmall,
-                  ),
-                ],
-                SizedBox(height: 10.h),
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 6,
-                  crossAxisAlignment: WrapCrossAlignment.center,
-                  children: <Widget>[
-                    MetaLabel(
-                      Format.relativeDate(memory.createdAt),
-                      icon: Icons.schedule_rounded,
-                    ),
-                    if (memory.audioCount > 0)
-                      MetaLabel(
-                        Format.duration(memory.audioDuration),
-                        icon: Icons.graphic_eq_rounded,
-                      ),
-                    if (memory.imageCount > 1)
-                      MetaLabel(
-                        '${memory.imageCount} images',
-                        icon: Icons.photo_library_outlined,
-                      ),
-                    if (memory.tags.isNotEmpty)
-                      MetaLabel(
-                        memory.tags.take(2).map((String t) => '#$t').join(' '),
-                        icon: Icons.tag_rounded,
-                      ),
-                    _StatusPill(memory: memory),
-                  ],
-                ),
-              ],
-            ),
+          Expanded(child: _Thumbnail(memory: memory)),
+          SizedBox(height: 10.r),
+          Text(
+            memory.title.trim().isEmpty ? 'Untitled memory' : memory.title,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: text.titleMedium,
           ),
-          Column(
-            mainAxisSize: MainAxisSize.min,
+          if (subtitle.isNotEmpty) ...<Widget>[
+            SizedBox(height: 4.r),
+            Text(
+              subtitle,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: text.bodySmall,
+            ),
+          ],
+          SizedBox(height: 8.r),
+          if (memory.hasAudio ||
+              memory.imageCount > 1 ||
+              memory.tags.isNotEmpty)
+            MetaLabel(
+              <String>[
+                if (memory.hasAudio) Format.duration(memory.audioDuration),
+                if (memory.imageCount > 1) '${memory.imageCount} images',
+                ...memory.tags.take(2).map((String tag) => '#$tag'),
+              ].join(' · '),
+            ),
+          _StatusPill(memory: memory),
+          Row(
             children: <Widget>[
+              Expanded(child: MetaLabel(Format.relativeDate(memory.createdAt))),
               _IconAction(
                 icon: memory.favorite
                     ? Icons.star_rounded
@@ -120,20 +94,29 @@ class MemoryCard extends StatelessWidget {
                     : AppColors.textSecondary(brightness),
                 onPressed: onFavorite,
               ),
-              if (memory.processing == MemoryProcessing.failed &&
-                  onRetry != null)
-                _IconAction(
-                  icon: Icons.refresh_rounded,
-                  label: 'Retry failed processing',
-                  color: AppColors.dangerFor(brightness),
-                  onPressed: onRetry!,
-                ),
-              if (onDelete != null)
-                _IconAction(
-                  icon: Icons.delete_outline_rounded,
-                  label: 'Delete this memory',
-                  color: AppColors.textSecondary(brightness),
-                  onPressed: onDelete!,
+              if (onDelete != null ||
+                  (memory.processing == MemoryProcessing.failed &&
+                      onRetry != null))
+                PopupMenuButton<VoidCallback>(
+                  tooltip: 'Memory actions',
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(minWidth: 160),
+                  icon: const Icon(Icons.more_vert_rounded, size: 20),
+                  onSelected: (VoidCallback action) => action(),
+                  itemBuilder: (BuildContext context) =>
+                      <PopupMenuEntry<VoidCallback>>[
+                        if (memory.processing == MemoryProcessing.failed &&
+                            onRetry != null)
+                          PopupMenuItem<VoidCallback>(
+                            value: onRetry,
+                            child: const Text('Retry failed processing'),
+                          ),
+                        if (onDelete != null)
+                          PopupMenuItem<VoidCallback>(
+                            value: onDelete,
+                            child: const Text('Delete this memory'),
+                          ),
+                      ],
                 ),
             ],
           ),
@@ -170,31 +153,35 @@ class _Thumbnail extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final Brightness brightness = Theme.of(context).brightness;
-    final double size = 82.r;
     final String? relative =
         memory.primaryThumbnailPath ?? memory.thumbnailHint;
     final bool hasImage = memory.hasImages && (relative?.isNotEmpty ?? false);
 
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(18.r),
-      child: Container(
-        width: size,
-        height: size,
-        color: AppColors.raised(brightness),
-        child: hasImage
-            ? _LocalImage(
-                relativePath: relative!,
-                cacheWidth: (size * 2.4).round(),
-              )
-            : Center(
-                child: Icon(
-                  memory.hasAudio
-                      ? Icons.graphic_eq_rounded
-                      : Icons.sticky_note_2_outlined,
-                  size: 26,
-                  color: AppColors.textSecondary(brightness),
+    return LayoutBuilder(
+      builder: (BuildContext context, BoxConstraints constraints) => ClipRRect(
+        borderRadius: BorderRadius.circular(18.r),
+        child: Container(
+          width: double.infinity,
+          height: double.infinity,
+          color: AppColors.raised(brightness),
+          child: hasImage
+              ? _LocalImage(
+                  relativePath: relative!,
+                  cacheWidth:
+                      (constraints.maxWidth *
+                              MediaQuery.devicePixelRatioOf(context))
+                          .round(),
+                )
+              : Center(
+                  child: Icon(
+                    memory.hasAudio
+                        ? Icons.graphic_eq_rounded
+                        : Icons.sticky_note_2_outlined,
+                    size: 26,
+                    color: AppColors.textSecondary(brightness),
+                  ),
                 ),
-              ),
+        ),
       ),
     );
   }
@@ -258,10 +245,13 @@ class _StatusPill extends StatelessWidget {
         color: AppColors.textSecondary(brightness),
         icon: Icons.hourglass_empty_rounded,
       ),
-      MemoryProcessing.failed => StatusBadge(
-        label: memory.jobError ?? 'Failed',
-        color: AppColors.dangerFor(brightness),
-        icon: Icons.error_outline_rounded,
+      MemoryProcessing.failed => Tooltip(
+        message: memory.jobError ?? 'Processing failed',
+        child: StatusBadge(
+          label: 'Failed',
+          color: AppColors.dangerFor(brightness),
+          icon: Icons.error_outline_rounded,
+        ),
       ),
       MemoryProcessing.none || MemoryProcessing.done => const SizedBox.shrink(),
     };

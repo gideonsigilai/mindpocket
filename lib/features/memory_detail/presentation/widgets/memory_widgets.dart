@@ -1093,7 +1093,7 @@ class _RelatedBlock extends StatelessWidget {
               ),
             ),
           Text(
-            'Suggestions compare words in your own content. They are not a judgement about relevance.',
+            'At least 90% matching text, ignoring case, spacing, and punctuation. Images themselves are not compared.',
             style: Theme.of(context).textTheme.labelSmall,
           ),
         ],
@@ -1158,7 +1158,7 @@ class _RelatedMemoryCard extends StatelessWidget {
                 ),
                 SizedBox(height: 4.h),
                 Text(
-                  'Shares ${suggestion.sharedTerms.join(', ')}',
+                  '${(suggestion.score * 100).round()}% text match',
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
                   style: Theme.of(context).textTheme.labelSmall,

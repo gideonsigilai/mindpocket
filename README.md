@@ -14,8 +14,8 @@ download an iCloud-only screenshot's original before it can be imported.
 | Capture | System image picker, Android share intent (cold/warm start), recording with pause/resume, typed notes, and attachments |
 | Screenshots | Launch/resume scans use Android MediaStore, iOS PhotoKit, or the real OS screenshot folders on desktop. A one-time permission request follows onboarding; limited access is supported. Durable receipts copy/process only unseen screenshots, including equal-date items and older images added later |
 | AI grouping | NVIDIA NIM files imported screenshots into collections by their extracted text (never the image bytes), reusing existing collection names, batching 25 items per request, one collection link per item, and reporting backend/parse failures without touching what is already filed |
-| Timeline | Filters (all / images / voice / notes / starred), newest or oldest first, paginated, skeletons, empty and error states |
-| Detail | Image-first preview (~75% of viewport), reduced-motion-aware parallax, original-image zoom, collapsed **Text from image**, tag-chip dialog, audio/transcript editing, and related-image previews; completed/canceled processing is hidden |
+| Timeline | Responsive, lazy image-first grid (two columns on phones, up to four on desktop; fewer at enlarged text), filters (all / images / voice / notes / starred), newest or oldest first, pagination, skeletons, empty and error states |
+| Detail | Image-first preview (~75% of viewport), reduced-motion-aware parallax, original-image zoom, collapsed **Text from image**, tag-chip dialog, audio/transcript editing, and related-image previews requiring at least 90% character-level text similarity; completed/canceled processing is hidden |
 | OCR | On device through a background Dart isolate: ML Kit's bundled Latin recognizer on Android/iOS, Apple Vision on macOS, Tesseract on Windows/Linux (bundled on Windows, a declared dependency on Linux). No Play Services, no first-use model download, no cloud fallback |
 | Search | Isolate-backed SQLite FTS5 over titles, notes, tags, OCR, and transcripts; BM25 snippets and off-thread lexical relatedness; stale query responses are discarded |
 | Transcription | Optional sherpa-onnx Whisper (tiny.en ~103 MB, tiny multilingual), downloaded to app storage, SHA-256 verified, run in a background isolate |
@@ -84,7 +84,7 @@ automatic screenshot import or the system picker.
 ### Desktop
 
 ```sh
-flutter build windows --release   # needs Visual Studio with C++ desktop workload
+flutter build windows --release   # needs Visual Studio C++ workload and Tesseract
 flutter build linux --release     # needs libgtk-3-dev, libsecret-1-dev, libmpv-dev
 flutter build macos --release     # needs Xcode command line tools
 ```
@@ -96,8 +96,13 @@ screenshots are never imported: dedicated folders take every image, while shared
 folders such as `Desktop` and `Pictures` require a screenshot-style filename.
 Access failures are reported; a missing folder is an empty library.
 
-Windows releases bundle Tesseract next to the executable, so OCR works without a
-separate install. Linux packages declare their OCR, audio and video runtime
+Every Windows build (Debug/Profile/Release) bundles Tesseract, its DLLs, and the
+English model next to the executable. On the build machine, install the engine
+with `winget install --id UB-Mannheim.TesseractOCR --exact`; CMake refuses an
+incomplete OCR runtime. The finished app needs no separate installation.
+Development lookup also recognizes per-user/per-machine installs and PATH,
+always preferring the bundled engine. Existing failed jobs can be retried after
+updating the build. Linux packages declare their OCR, audio and video runtime
 packages as Debian dependencies instead of embedding them.
 
 ### Release pipeline
@@ -222,8 +227,15 @@ a throwaway directory, with deterministic OCR/ASR fakes:
 
 ## Latest verification
 
-- Full Flutter suite: **105 passing** (including desktop screenshot and OCR
+- Full Flutter suite: **108 passing** (including desktop screenshot and OCR
   coverage), static analysis: **no issues**.
+- Current Windows Debug and Release builds succeed with the OCR runtime bundled
+  by CMake. A failed job completed on retry through the real OCR service; the
+  release engine also extracted `Cafe Menu — KSh 1,250` with only Windows system
+  directories on PATH.
+- Native grid smoke: phone/tablet/desktop widths, 2× text, pagination, and opening
+  a memory were exercised without Flutter errors. A 90% text match appeared on
+  detail while the weaker match was excluded.
 - Windows: clean `flutter build windows --release`, then `windows.ps1` produced a
   66 MB Inno Setup installer and a 93 MB portable ZIP; the packaged build was
   launched from its portable folder and stayed resident. See `verify/desktop.md`.
@@ -317,6 +329,9 @@ Grouping sends extracted text only. The API key is stored with
   its title alone.
 - Cloud analysis requires your own proxy (`Settings → Cloud analysis`). No
   provider key is bundled in the APK.
-- Related matching is lexical, including OCR/transcripts, not image understanding
-  or embedding-based semantic search. Suggestions name their comparison context
-  and are not calibrated confidence scores.
+- Memory-detail suggestions require at least 90% normalized Levenshtein text
+  similarity: `1 - edit distance / longer text length`, over the full title,
+  note, OCR, and transcripts. Comparison ignores case, punctuation, and spacing;
+  letters/digits and their order still matter. Search, collection, and interest
+  suggestions remain lexical. No matching method understands image pixels or
+  provides a calibrated confidence score.

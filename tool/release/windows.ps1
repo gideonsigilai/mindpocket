@@ -14,9 +14,10 @@ $release = Join-Path $root 'build\windows\x64\runner\Release'
 if (-not (Test-Path (Join-Path $release 'mindpocket.exe'))) {
     throw "Windows release executable not found in $release. Run 'flutter build windows --release' first."
 }
-foreach ($library in @('libmpv-2.dll', 'sqlite3.dll')) {
-    if (-not (Test-Path (Join-Path $release $library))) {
-        throw "$library was not bundled by the Flutter build; refusing to ship a build that cannot start audio or storage."
+foreach ($file in @('libmpv-2.dll', 'sqlite3.dll',
+    'tesseract\tesseract.exe', 'tesseract\tessdata\eng.traineddata')) {
+    if (-not (Test-Path (Join-Path $release $file))) {
+        throw "$file was not bundled by the Flutter build; refusing to ship an incomplete runtime."
     }
 }
 
@@ -30,41 +31,10 @@ $semver = $Matches[1]
 $build = $Matches[2]
 $version = "$semver+$build"
 
-# Assemble a self-contained install tree: Flutter bundle + Tesseract runtime.
+# The Flutter build already assembles the complete native/OCR runtime.
 $app = Join-Path $staging 'app'
 if (Test-Path $app) { Remove-Item -Recurse -Force $app }
 Copy-Item -Recurse -Force $release $app
-
-# choco installs per-machine, winget per-user, and an installer run with
-# /DIR can land anywhere; check all three before failing.
-$tesseractRoot = $null
-foreach ($candidate in @(
-    (Join-Path $env:ProgramFiles 'Tesseract-OCR'),
-    (Join-Path $env:LOCALAPPDATA 'Programs\Tesseract-OCR'),
-    (Join-Path ${env:ProgramFiles(x86)} 'Tesseract-OCR')
-)) {
-    if (Test-Path (Join-Path $candidate 'tesseract.exe')) {
-        $tesseractRoot = $candidate
-        break
-    }
-}
-if (-not $tesseractRoot) {
-    throw 'Tesseract was not found under Program Files or LOCALAPPDATA\Programs.'
-}
-$target = Join-Path $app 'tesseract'
-New-Item -ItemType Directory -Force -Path $target | Out-Null
-Copy-Item (Join-Path $tesseractRoot 'tesseract.exe') $target
-Get-ChildItem $tesseractRoot -Filter '*.dll' | Copy-Item -Destination $target
-$tessdata = Join-Path $target 'tessdata'
-New-Item -ItemType Directory -Force -Path $tessdata | Out-Null
-Copy-Item (Join-Path $tesseractRoot 'tessdata\eng.traineddata') $tessdata
-foreach ($name in @('LICENSE', 'LICENSE.txt', 'COPYING')) {
-    $candidate = Join-Path $tesseractRoot $name
-    if (Test-Path $candidate) {
-        Copy-Item $candidate (Join-Path $target 'TESSERACT-LICENSE.txt')
-        break
-    }
-}
 
 $iss = Join-Path $staging 'mindpocket.iss'
 @"

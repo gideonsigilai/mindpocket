@@ -71,7 +71,9 @@ void main() {
 
     // The card is rendered and unstarred.
     expect(find.text('Star me'), findsWidgets);
-    expect(find.bySemanticsLabel('Star this memory'), findsWidgets);
+    await tester.ensureVisible(find.byTooltip('Star this memory'));
+    await tester.pumpAndSettle();
+    expect(controller.memories.single.favorite, isFalse);
 
     controller.pendingJobs.value = 2;
     await tester.pump();
@@ -82,14 +84,13 @@ void main() {
     expect(find.textContaining('being processed'), findsNothing);
 
     // Starring must redraw the card, not only write to SQLite.
-    await tester.runAsync(
-      () => controller.toggleFavorite(controller.memories.single),
-    );
+    await tester.tap(find.byTooltip('Star this memory'));
     await tester.runAsync(
       () => Future<void>.delayed(const Duration(milliseconds: 100)),
     );
     await tester.pump();
-    expect(find.bySemanticsLabel('Remove from starred'), findsWidgets);
+    expect(controller.memories.single.favorite, isTrue);
+    expect(find.byIcon(Icons.star_rounded), findsOneWidget);
 
     await tester.runAsync(harness.dispose);
   });

@@ -93,6 +93,34 @@ install(DIRECTORY "${NATIVE_ASSETS_DIR}"
    DESTINATION "${INSTALL_BUNDLE_LIB_DIR}"
    COMPONENT Runtime)
 
+# Every Windows build must run OCR in place, not only the release packager.
+find_program(TESSERACT_EXECUTABLE NAMES tesseract.exe
+  HINTS
+    "$ENV{LOCALAPPDATA}/Programs/Tesseract-OCR"
+    "$ENV{ProgramFiles}/Tesseract-OCR"
+    "$ENV{ProgramFiles\(x86\)}/Tesseract-OCR")
+if(NOT TESSERACT_EXECUTABLE)
+  message(FATAL_ERROR
+    "Tesseract OCR is required. Install it with winget install --id UB-Mannheim.TesseractOCR --exact, then rebuild.")
+endif()
+get_filename_component(TESSERACT_DIRECTORY "${TESSERACT_EXECUTABLE}" DIRECTORY)
+if(NOT EXISTS "${TESSERACT_DIRECTORY}/tessdata/eng.traineddata")
+  message(FATAL_ERROR "Tesseract's English model is missing from ${TESSERACT_DIRECTORY}/tessdata.")
+endif()
+file(GLOB TESSERACT_LIBRARIES CONFIGURE_DEPENDS "${TESSERACT_DIRECTORY}/*.dll")
+install(FILES "${TESSERACT_EXECUTABLE}" ${TESSERACT_LIBRARIES}
+  DESTINATION "${INSTALL_BUNDLE_LIB_DIR}/tesseract" COMPONENT Runtime)
+install(FILES "${TESSERACT_DIRECTORY}/tessdata/eng.traineddata"
+  DESTINATION "${INSTALL_BUNDLE_LIB_DIR}/tesseract/tessdata" COMPONENT Runtime)
+foreach(LICENSE_NAME LICENSE LICENSE.txt COPYING doc/LICENSE)
+  if(EXISTS "${TESSERACT_DIRECTORY}/${LICENSE_NAME}")
+    install(FILES "${TESSERACT_DIRECTORY}/${LICENSE_NAME}"
+      DESTINATION "${INSTALL_BUNDLE_LIB_DIR}/tesseract"
+      RENAME TESSERACT-LICENSE.txt COMPONENT Runtime)
+    break()
+  endif()
+endforeach()
+
 # Fully re-copy the assets directory on each build to avoid having stale files
 # from a previous install.
 set(FLUTTER_ASSET_DIR_NAME "flutter_assets")

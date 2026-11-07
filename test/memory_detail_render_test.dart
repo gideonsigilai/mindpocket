@@ -312,7 +312,7 @@ void main() {
       final Memory second = await _image(
         tester,
         harness,
-        title: 'Pocket navigation second',
+        title: 'Pocket navigation first!',
         fileName: 'second.png',
         size: 22,
       );
