@@ -1,0 +1,61 @@
+name: Build unsigned iOS IPA
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-ios-ipa:
+    name: Build unsigned iOS IPA
+    runs-on: macos-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.97.1
+          targets: aarch64-apple-ios
+
+      - name: Install Flutter dependencies
+        run: flutter pub get
+
+      - name: Build iOS app without code signing
+        run: flutter build ios --release --no-codesign
+
+      - name: Package unsigned IPA
+        shell: bash
+        run: |
+          set -euo pipefail
+          app_path="build/ios/iphoneos/Runner.app"
+          ipa_dir="build/ios/ipa"
+          ipa_name="local_ai_studio-unsigned.ipa"
+
+          test -d "$app_path"
+          mkdir -p "$ipa_dir/Payload"
+          cp -R "$app_path" "$ipa_dir/Payload/Runner.app"
+          (
+            cd "$ipa_dir"
+            ditto -c -k --sequesterRsrc --keepParent Payload "$ipa_name"
+            unzip -Z1 "$ipa_name" | grep -Fx 'Payload/Runner.app/Info.plist'
+          )
+          ls -lh "$ipa_dir/$ipa_name"
+
+      - name: Upload unsigned IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: local-ai-studio-unsigned-ipa
+          path: build/ios/ipa/local_ai_studio-unsigned.ipa
+          if-no-files-found: error
+          retention-days: 14
